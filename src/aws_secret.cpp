@@ -37,7 +37,8 @@ static unique_ptr<KeyValueSecret> ConstructBaseS3Secret(vector<string> &prefix_p
 //! Generate a custom credential provider chain for authentication
 class DuckDBCustomAWSCredentialsProviderChain : public Aws::Auth::AWSCredentialsProviderChain {
 public:
-	explicit DuckDBCustomAWSCredentialsProviderChain(const string &credential_chain, const string &profile = "", const string &assume_role_arn = "") {
+	explicit DuckDBCustomAWSCredentialsProviderChain(const string &credential_chain, const string &profile = "",
+	                                                 const string &assume_role_arn = "") {
 		auto chain_list = StringUtil::Split(credential_chain, ';');
 
 		for (const auto &item : chain_list) {
@@ -87,8 +88,6 @@ static string TryGetStringParam(CreateSecretInput &input, const string &param_na
 
 //! This is the actual callback function
 static unique_ptr<BaseSecret> CreateAWSSecretFromCredentialChain(ClientContext &context, CreateSecretInput &input) {
-	Aws::SDKOptions options;
-	Aws::InitAPI(options);
 	Aws::Auth::AWSCredentials credentials;
 
 	string profile = TryGetStringParam(input, "profile");
@@ -134,7 +133,6 @@ static unique_ptr<BaseSecret> CreateAWSSecretFromCredentialChain(ClientContext &
 
 	auto result = ConstructBaseS3Secret(scope, input.type, input.provider, input.name);
 
-
 	if (!region.empty()) {
 		result->secret_map["region"] = region;
 	}
@@ -146,13 +144,11 @@ static unique_ptr<BaseSecret> CreateAWSSecretFromCredentialChain(ClientContext &
 		result->secret_map["session_token"] = Value(credentials.GetSessionToken());
 	}
 
-	Aws::ShutdownAPI(options);
-
 	ParseCoreS3Config(input, *result);
 
 	// Set endpoint defaults TODO: move to consumer side of secret
 	auto endpoint_lu = result->secret_map.find("endpoint");
-	if (endpoint_lu ==  result->secret_map.end() || endpoint_lu->second.ToString().empty()) {
+	if (endpoint_lu == result->secret_map.end() || endpoint_lu->second.ToString().empty()) {
 		if (input.type == "s3") {
 			result->secret_map["endpoint"] = "s3.amazonaws.com";
 		} else if (input.type == "r2") {
@@ -168,7 +164,7 @@ static unique_ptr<BaseSecret> CreateAWSSecretFromCredentialChain(ClientContext &
 
 	// Set endpoint defaults TODO: move to consumer side of secret
 	auto url_style_lu = result->secret_map.find("url_style");
-	if (url_style_lu ==  result->secret_map.end() || endpoint_lu->second.ToString().empty()) {
+	if (url_style_lu == result->secret_map.end() || endpoint_lu->second.ToString().empty()) {
 		if (input.type == "gcs" || input.type == "r2") {
 			result->secret_map["url_style"] = "path";
 		}
@@ -180,7 +176,7 @@ static unique_ptr<BaseSecret> CreateAWSSecretFromCredentialChain(ClientContext &
 void CreateAwsSecretFunctions::Register(DatabaseInstance &instance) {
 	vector<string> types = {"s3", "r2", "gcs"};
 
-	for (const auto& type : types) {
+	for (const auto &type : types) {
 		// Register the credential_chain secret provider
 		CreateSecretFunction cred_chain_function = {type, "credential_chain", CreateAWSSecretFromCredentialChain};
 

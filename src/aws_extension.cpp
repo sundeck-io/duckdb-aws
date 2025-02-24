@@ -16,8 +16,6 @@ namespace duckdb {
 
 //! Set the DuckDB AWS Credentials using the DefaultAWSCredentialsProviderChain
 static AwsSetCredentialsResult TrySetAwsCredentials(DBConfig &config, const string &profile, bool set_region) {
-	Aws::SDKOptions options;
-	Aws::InitAPI(options);
 	Aws::Auth::AWSCredentials credentials;
 
 	if (!profile.empty()) {
@@ -51,7 +49,6 @@ static AwsSetCredentialsResult TrySetAwsCredentials(DBConfig &config, const stri
 		ret.set_region = region;
 	}
 
-	Aws::ShutdownAPI(options);
 	return ret;
 }
 
@@ -121,6 +118,9 @@ static void LoadAWSCredentialsFun(ClientContext &context, TableFunctionInput &da
 	data.finished = true;
 }
 static void LoadInternal(DuckDB &db) {
+	Aws::SDKOptions options;
+	Aws::InitAPI(options);
+
 	TableFunctionSet function_set("load_aws_credentials");
 	auto base_fun = TableFunction("load_aws_credentials", {}, LoadAWSCredentialsFun, LoadAWSCredentialsBind);
 	auto profile_fun =
