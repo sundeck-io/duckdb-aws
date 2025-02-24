@@ -3,7 +3,7 @@
     "zlib",
     {
       "name": "aws-sdk-cpp",
-      "features": [ "sso", "sts" ]
+      "features": [ "sso", "sts" , "identity-management"]
     },
     "openssl"
   ]

@@ -120,7 +120,6 @@ static void LoadAWSCredentialsFun(ClientContext &context, TableFunctionInput &da
 
 	data.finished = true;
 }
-
 static void LoadInternal(DuckDB &db) {
 	TableFunctionSet function_set("load_aws_credentials");
 	auto base_fun = TableFunction("load_aws_credentials", {}, LoadAWSCredentialsFun, LoadAWSCredentialsBind);
