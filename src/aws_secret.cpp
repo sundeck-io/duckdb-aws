@@ -89,12 +89,13 @@ static string TryGetStringParam(CreateSecretInput &input, const string &param_na
 //! This is the actual callback function
 static unique_ptr<BaseSecret> CreateAWSSecretFromCredentialChain(ClientContext &context, CreateSecretInput &input) {
 	Aws::Auth::AWSCredentials credentials;
+	string chain;
 
 	string profile = TryGetStringParam(input, "profile");
 	string assume_role = TryGetStringParam(input, "assume_role_arn");
 
 	if (input.options.find("chain") != input.options.end()) {
-		string chain = TryGetStringParam(input, "chain");
+		chain = TryGetStringParam(input, "chain");
 
 		DuckDBCustomAWSCredentialsProviderChain provider(chain, profile, assume_role);
 		credentials = provider.GetAWSCredentials();
@@ -126,6 +127,8 @@ static unique_ptr<BaseSecret> CreateAWSSecretFromCredentialChain(ClientContext &
 		} else if (input.type == "gcs") {
 			scope.push_back("gcs://");
 			scope.push_back("gs://");
+		} else if (input.type == "aws") {
+			scope.push_back("");
 		} else {
 			throw InternalException("Unknown secret type found in aws extension: '%s'", input.type);
 		}
@@ -135,6 +138,24 @@ static unique_ptr<BaseSecret> CreateAWSSecretFromCredentialChain(ClientContext &
 
 	if (!region.empty()) {
 		result->secret_map["region"] = region;
+	}
+
+	// Only auto is supported
+	string refresh = TryGetStringParam(input, "refresh");
+
+	// We have sneaked in this special handling where if you set the STS chain, you automatically enable refresh
+	// TODO: remove this once refresh is set to auto by default for all credential_chain provider created secrets.
+	if (chain == "sts" && refresh.empty()) {
+		refresh = "auto";
+	}
+
+	if (refresh == "auto") {
+		child_list_t<Value> struct_fields;
+		for (const auto &named_param : input.options) {
+			auto lower_name = StringUtil::Lower(named_param.first);
+			struct_fields.push_back({lower_name, named_param.second});
+		}
+		result->secret_map["refresh_info"] = Value::STRUCT(struct_fields);
 	}
 
 	AwsSetCredentialsResult ret;
@@ -157,6 +178,8 @@ static unique_ptr<BaseSecret> CreateAWSSecretFromCredentialChain(ClientContext &
 			}
 		} else if (input.type == "gcs") {
 			result->secret_map["endpoint"] = "storage.googleapis.com";
+		} else if (input.type == "aws") {
+			// this is a nop?
 		} else {
 			throw InternalException("Unknown secret type found in httpfs extension: '%s'", input.type);
 		}
@@ -174,7 +197,7 @@ static unique_ptr<BaseSecret> CreateAWSSecretFromCredentialChain(ClientContext &
 }
 
 void CreateAwsSecretFunctions::Register(DatabaseInstance &instance) {
-	vector<string> types = {"s3", "r2", "gcs"};
+	vector<string> types = {"s3", "r2", "gcs", "aws"};
 
 	for (const auto &type : types) {
 		// Register the credential_chain secret provider
@@ -192,7 +215,7 @@ void CreateAwsSecretFunctions::Register(DatabaseInstance &instance) {
 
 		cred_chain_function.named_parameters["assume_role_arn"] = LogicalType::VARCHAR;
 
-		cred_chain_function.named_parameters["refresh"] = LogicalType::BOOLEAN;
+		cred_chain_function.named_parameters["refresh"] = LogicalType::VARCHAR;
 
 		if (type == "r2") {
 			cred_chain_function.named_parameters["account_id"] = LogicalType::VARCHAR;
