@@ -121,6 +121,8 @@ static void LoadInternal(DuckDB &db) {
 	Aws::SDKOptions options;
 	Aws::InitAPI(options);
 
+	CreateAwsSecretFunctions::InitializeCurlCertificates(*db.instance);
+
 	TableFunctionSet function_set("load_aws_credentials");
 	auto base_fun = TableFunction("load_aws_credentials", {}, LoadAWSCredentialsFun, LoadAWSCredentialsBind);
 	auto profile_fun =

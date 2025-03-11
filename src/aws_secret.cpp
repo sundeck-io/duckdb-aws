@@ -10,8 +10,30 @@
 #include <aws/core/client/ClientConfiguration.h>
 #include <aws/identity-management/auth/STSAssumeRoleCredentialsProvider.h>
 #include <aws/identity-management/auth/STSProfileCredentialsProvider.h>
+#include <aws/sts/STSClient.h>
+
+#include <sys/stat.h>
 
 namespace duckdb {
+
+//! We use a global here to store the path that is selected on the ICAPI::InitializeCurl call
+static string SELECTED_CURL_CERT_PATH;
+
+// we statically compile in libcurl, which means the cert file location of the build machine is the
+// place curl will look. But not every distro has this file in the same location, so we search a
+// number of common locations and use the first one we find.
+static string certFileLocations[] = {
+	// Arch, Debian-based, Gentoo
+	"/etc/ssl/certs/ca-certificates.crt",
+	// RedHat 7 based
+	"/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+	// Redhat 6 based
+	"/etc/pki/tls/certs/ca-bundle.crt",
+	// OpenSUSE
+	"/etc/ssl/ca-bundle.pem",
+	// Alpine
+	"/etc/ssl/cert.pem"
+};
 
 //! Parse and set the remaining options
 static void ParseCoreS3Config(CreateSecretInput &input, KeyValueSecret &secret) {
@@ -43,10 +65,15 @@ public:
 
 		for (const auto &item : chain_list) {
 			if (item == "sts") {
+				Aws::Client::ClientConfiguration clientConfig;
+				if (!SELECTED_CURL_CERT_PATH.empty()) {
+					clientConfig.caFile = SELECTED_CURL_CERT_PATH;   // Set the CA file
+				}
+				auto sts_client = std::make_shared<Aws::STS::STSClient>(clientConfig);
 				if (!profile.empty()) {
 					AddProvider(std::make_shared<Aws::Auth::STSProfileCredentialsProvider>(profile));
 				} else if (!assume_role_arn.empty()) {
-					AddProvider(std::make_shared<Aws::Auth::STSAssumeRoleCredentialsProvider>(assume_role_arn));
+					AddProvider(std::make_shared<Aws::Auth::STSAssumeRoleCredentialsProvider>(assume_role_arn, Aws::String(), Aws::String(), Aws::Auth::DEFAULT_CREDS_LOAD_FREQ_SECONDS, sts_client));
 				} else {
 					// TODO: I don't think this does anything
 					AddProvider(std::make_shared<Aws::Auth::STSAssumeRoleWebIdentityCredentialsProvider>());
@@ -194,6 +221,17 @@ static unique_ptr<BaseSecret> CreateAWSSecretFromCredentialChain(ClientContext &
 	}
 
 	return std::move(result);
+}
+
+void CreateAwsSecretFunctions::InitializeCurlCertificates(DatabaseInstance &db) {
+	for (string& caFile : certFileLocations) {
+		struct stat buf;
+		if (stat(caFile.c_str(), &buf) == 0) {
+			SELECTED_CURL_CERT_PATH = caFile;
+			DUCKDB_LOG_DEBUG(db, "aws.CaCertificateDetection", "CA path: %s", SELECTED_CURL_CERT_PATH);
+			return;
+		}
+	}
 }
 
 void CreateAwsSecretFunctions::Register(DatabaseInstance &instance) {
